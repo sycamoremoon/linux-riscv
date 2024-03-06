@@ -26,7 +26,18 @@
 
 #include "dc_trace.h"
 
-#include <linux/fpu.h>
+#if defined(CONFIG_X86)
+#include <asm/fpu/api.h>
+#elif defined(CONFIG_PPC64)
+#include <asm/switch_to.h>
+#include <asm/cputable.h>
+#elif defined(CONFIG_ARM64)
+#include <asm/neon.h>
+#elif defined(CONFIG_LOONGARCH)
+#include <asm/fpu.h>
+#elif defined(CONFIG_RISCV)
+#include <asm/switch_to.h>
+#endif
 
 /**
  * DOC: DC FPU manipulation overview
@@ -75,11 +86,12 @@ void dc_fpu_begin(const char *function_name, const int line)
 {
 	int depth;
 
-	WARN_ON_ONCE(!in_task());
-	preempt_disable();
-	depth = __this_cpu_inc_return(fpu_recursion_depth);
-	if (depth == 1) {
-		BUG_ON(!kernel_fpu_available());
+	pcpu = get_cpu_ptr(&fpu_recursion_depth);
+	*pcpu += 1;
+
+	if (*pcpu == 1) {
+#if defined(CONFIG_X86) || defined(CONFIG_LOONGARCH) || defined(CONFIG_RISCV)
+		migrate_disable();
 		kernel_fpu_begin();
 	}
 
@@ -100,8 +112,10 @@ void dc_fpu_end(const char *function_name, const int line)
 {
 	int depth;
 
-	depth = __this_cpu_dec_return(fpu_recursion_depth);
-	if (depth == 0) {
+	pcpu = get_cpu_ptr(&fpu_recursion_depth);
+	*pcpu -= 1;
+	if (*pcpu <= 0) {
+#if defined(CONFIG_X86) || defined(CONFIG_LOONGARCH) || defined(CONFIG_RISCV)
 		kernel_fpu_end();
 	} else {
 		WARN_ON_ONCE(depth < 0);
