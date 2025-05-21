@@ -23,6 +23,42 @@
 		serial0 = &uart0;
 	};
 
+	/* the mem node will be updated by ZSBL. */
+	memory@0 {
+		device_type = "memory";
+		reg = <0x00000000 0x00000000 0x00000000 0x00000000>;
+		numa-node-id = <0>;
+	};
+	memory@1 {
+		device_type = "memory";
+		reg = <0x00000000 0x00000001 0x00000000 0x00000000>;
+		numa-node-id = <1>;
+	};
+	memory@2 {
+		device_type = "memory";
+		reg = <0x00000000 0x00000002 0x00000000 0x00000000>;
+		numa-node-id = <2>;
+	};
+	memory@3 {
+		device_type = "memory";
+		reg = <0x00000000 0x00000003 0x00000000 0x00000000>;
+		numa-node-id = <3>;
+	};
+
+	reserved-memory {
+		#address-cells = <0x2>;
+		#size-cells = <0x2>;
+		ranges;
+		linux,cma {
+			compatible = "shared-dma-pool";
+			size = <0x00000000 0x10000000>;
+			alloc-ranges = <0x00000000 0xc0000000
+					0x00000000 0xd0000000>;
+			reusable;
+			linux,cma-default;
+		};
+	};
+
 	cgi_main: oscillator0 {
 		compatible = "fixed-clock";
 		clock-output-names = "cgi_main";
