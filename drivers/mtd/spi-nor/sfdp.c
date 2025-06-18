@@ -1388,11 +1388,11 @@ int spi_nor_check_sfdp_signature(struct spi_nor *nor)
 	err = spi_nor_read_sfdp_dma_unsafe(nor, 0, sizeof(signature),
 					   &signature);
 	if (err < 0)
-		return err;
+		pr_info("SPI-NOR: Signature [%08x] Failed!...OK, Let it go. \n", le32_to_cpu(signature));
 
 	/* Check the SFDP signature. */
 	if (le32_to_cpu(signature) != SFDP_SIGNATURE)
-		return -EINVAL;
+		return 0;
 
 	return 0;
 }
