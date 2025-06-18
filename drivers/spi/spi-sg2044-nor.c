@@ -13,6 +13,17 @@
 #include <linux/platform_device.h>
 #include <linux/spi/spi-mem.h>
 
+#define SOPHGO_SPI_CTRL                 0x000
+#define SOPHGO_SPI_CE_CTRL              0x004
+#define SOPHGO_SPI_DLY_CTRL             0x008
+#define SOPHGO_SPI_DMMR                 0x00C
+#define SOPHGO_SPI_TRAN_CSR             0x010
+#define SOPHGO_SPI_TRAN_NUM             0x014
+#define SOPHGO_SPI_FIFO_PORT            0x018
+#define SOPHGO_SPI_FIFO_PT              0x020
+#define SOPHGO_SPI_INT_STS              0x028
+#define SOPHGO_SPI_INT_EN               0x02c
+
 /* Hardware register definitions */
 #define SPIFMC_CTRL				0x00
 #define SPIFMC_CTRL_CPHA			BIT(12)
@@ -34,6 +45,8 @@
 #define SPIFMC_CTRL_FM_INTVL			BIT(0)
 #define SPIFMC_CTRL_CET_MASK			0x0f00
 #define SPIFMC_CTRL_CET				BIT(8)
+#define SPIFMC_CTRL_CET_SMP_DLY_MASK		GENMASK(12, 13)
+#define SPIFMC_CTRL_CET_NEG_SAMPLE		BIT(14)
 
 #define SPIFMC_DMMR				0x0c
 
@@ -77,9 +90,6 @@
 #define SPIFMC_INT_RX_FRAME_EN			BIT(4)
 #define SPIFMC_INT_TX_FRAME_EN			BIT(5)
 
-#define SPIFMC_OPT				0x030
-#define SPIFMC_OPT_DISABLE_FIFO_FLUSH		BIT(1)
-
 #define SPIFMC_MAX_FIFO_DEPTH			8
 
 #define SPIFMC_MAX_READ_SIZE			0x10000
@@ -96,8 +106,10 @@ static int sg2044_spifmc_wait_int(struct sg2044_spifmc *spifmc, u8 int_type)
 {
 	u32 stat;
 
-	return readl_poll_timeout(spifmc->io_base + SPIFMC_INT_STS, stat,
+	int ret = readl_poll_timeout(spifmc->io_base + SPIFMC_INT_STS, stat,
 				  (stat & int_type), 0, 1000000);
+	if(ret) pr_info("[SG2042] stat: %x interrupt_type: %x", stat, int_type);
+	return ret;
 }
 
 static int sg2044_spifmc_wait_xfer_size(struct sg2044_spifmc *spifmc,
@@ -105,8 +117,10 @@ static int sg2044_spifmc_wait_xfer_size(struct sg2044_spifmc *spifmc,
 {
 	u8 stat;
 
-	return readl_poll_timeout(spifmc->io_base + SPIFMC_FIFO_PT, stat,
+	int ret = readl_poll_timeout(spifmc->io_base + SPIFMC_FIFO_PT, stat,
 				  ((stat & 0xf) == xfer_size), 1, 1000000);
+	if(ret) pr_info("[SG2042] fifo_size: %x wanted_size: %x", stat, xfer_size);
+	return ret;
 }
 
 static u32 sg2044_spifmc_init_reg(struct sg2044_spifmc *spifmc)
@@ -136,12 +150,26 @@ static ssize_t sg2044_spifmc_read_64k(struct sg2044_spifmc *spifmc,
 	u32 reg;
 	int ret;
 	int i;
+	static int count;
+	count++;
 
 	reg = sg2044_spifmc_init_reg(spifmc);
 	reg |= (op->addr.nbytes + op->dummy.nbytes) << SPIFMC_TRAN_CSR_ADDR_BYTES_SHIFT;
 	reg |= SPIFMC_TRAN_CSR_FIFO_TRG_LVL_8_BYTE;
 	reg |= SPIFMC_TRAN_CSR_WITH_CMD;
 	reg |= SPIFMC_TRAN_CSR_TRAN_MODE_RX;
+
+	pr_info("\n0. [SG2042] origin_csr \n"
+		"ctrl:      %08x, ce_ctrl:  %08x\n"
+		"dly_ctrl:  %08x, dmmr:     %08x\n"
+		"tran_csr:  %08x, tran_num: %08x\n"
+		"fifo_port: %08x, fifo_pt:  %08x\n"
+		"int_sys:   %08x, int_en:   %08x\n"
+		, readw(spifmc->io_base + SOPHGO_SPI_CTRL) , readw(spifmc->io_base + SOPHGO_SPI_CE_CTRL)
+		, readw(spifmc->io_base + SOPHGO_SPI_DLY_CTRL) , readw(spifmc->io_base + SOPHGO_SPI_DMMR)
+		, readw(spifmc->io_base + SOPHGO_SPI_TRAN_CSR) , readw(spifmc->io_base + SOPHGO_SPI_TRAN_NUM)
+		, 0xffffffff /* Should not read */ , readw(spifmc->io_base + SOPHGO_SPI_FIFO_PT)
+		, readw(spifmc->io_base + SOPHGO_SPI_INT_STS) , readw(spifmc->io_base + SOPHGO_SPI_INT_EN));
 
 	writel(0, spifmc->io_base + SPIFMC_FIFO_PT);
 	writeb(op->cmd.opcode, spifmc->io_base + SPIFMC_FIFO_PORT);
@@ -155,20 +183,50 @@ static ssize_t sg2044_spifmc_read_64k(struct sg2044_spifmc *spifmc,
 	writel(len, spifmc->io_base + SPIFMC_TRAN_NUM);
 	writel(0, spifmc->io_base + SPIFMC_INT_STS);
 	reg |= SPIFMC_TRAN_CSR_GO_BUSY;
+
 	writel(reg, spifmc->io_base + SPIFMC_TRAN_CSR);
 
+	pr_info("1. [SG2042] masked_csr \n"
+		"ctrl:      %08x, ce_ctrl:  %08x\n"
+		"dly_ctrl:  %08x, dmmr:     %08x\n"
+		"tran_csr:  %08x, tran_num: %08x\n"
+		"fifo_port: %08x, fifo_pt:  %08x\n"
+		"int_sys:   %08x, int_en:   %08x\n"
+		, readw(spifmc->io_base + SOPHGO_SPI_CTRL) , readw(spifmc->io_base + SOPHGO_SPI_CE_CTRL)
+		, readw(spifmc->io_base + SOPHGO_SPI_DLY_CTRL) , readw(spifmc->io_base + SOPHGO_SPI_DMMR)
+		, readw(spifmc->io_base + SOPHGO_SPI_TRAN_CSR) , readw(spifmc->io_base + SOPHGO_SPI_TRAN_NUM)
+		, 0xffffffff /* Should not read */ , readw(spifmc->io_base + SOPHGO_SPI_FIFO_PT)
+		, readw(spifmc->io_base + SOPHGO_SPI_INT_STS) , readw(spifmc->io_base + SOPHGO_SPI_INT_EN));
+
+
 	ret = sg2044_spifmc_wait_int(spifmc, SPIFMC_INT_RD_FIFO);
-	if (ret < 0)
+	if (ret < 0) {
+		dev_warn(spifmc->dev, " %s spifmc_wait_int RD_FIFO timed out.", __func__);
+		pr_info("2. [SG2042] RD_FIFO timed out csr \n"
+			"ctrl:      %08x, ce_ctrl:  %08x\n"
+			"dly_ctrl:  %08x, dmmr:     %08x\n"
+			"tran_csr:  %08x, tran_num: %08x\n"
+			"fifo_port: %08x, fifo_pt:  %08x\n"
+			"int_sys:   %08x, int_en:   %08x\n"
+			, readw(spifmc->io_base + SOPHGO_SPI_CTRL) , readw(spifmc->io_base + SOPHGO_SPI_CE_CTRL)
+			, readw(spifmc->io_base + SOPHGO_SPI_DLY_CTRL) , readw(spifmc->io_base + SOPHGO_SPI_DMMR)
+			, readw(spifmc->io_base + SOPHGO_SPI_TRAN_CSR) , readw(spifmc->io_base + SOPHGO_SPI_TRAN_NUM)
+			, 0xffffffff /* Should not read */ , readw(spifmc->io_base + SOPHGO_SPI_FIFO_PT)
+			, readw(spifmc->io_base + SOPHGO_SPI_INT_STS) , readw(spifmc->io_base + SOPHGO_SPI_INT_EN));
 		return ret;
+	}
 
 	offset = 0;
 	while (offset < len) {
 		xfer_size = min_t(size_t, SPIFMC_MAX_FIFO_DEPTH, len - offset);
 
 		ret = sg2044_spifmc_wait_xfer_size(spifmc, xfer_size);
-		if (ret < 0)
+		if (ret < 0) {
+			dev_warn(spifmc->dev, " %s spifmc_wait_xfer_size timed out.", __func__);
 			return ret;
+		}
 
+		pr_info("3. [SG2042] READ called %d offset :%d len :%lu xfer_size :%d", count, offset, len, xfer_size);
 		for (i = 0; i < xfer_size; i++)
 			buf[i + offset] = readb(spifmc->io_base + SPIFMC_FIFO_PORT);
 
@@ -176,8 +234,10 @@ static ssize_t sg2044_spifmc_read_64k(struct sg2044_spifmc *spifmc,
 	}
 
 	ret = sg2044_spifmc_wait_int(spifmc, SPIFMC_INT_TRAN_DONE);
-	if (ret < 0)
+	if (ret < 0) {
+		dev_warn(spifmc->dev, " %s spifmc_wait_int TRAN_DONE timed out.", __func__);
 		return ret;
+	}
 
 	writel(0, spifmc->io_base + SPIFMC_FIFO_PT);
 
@@ -193,6 +253,17 @@ static ssize_t sg2044_spifmc_read(struct sg2044_spifmc *spifmc,
 	size_t len = op->data.nbytes;
 	int ret;
 	u8 *din = op->data.buf.in;
+
+	pr_info("[SG2042] spifmc READ begin");
+	pr_info("op->cmd.nbytes:   %08hhd op->cmd.opcode: %08hx"
+		"op->addr.nbytes:  %08hhd op->addr.val:   %08llx"
+		"op->dummy.nbytes: %08hhd op->data.dir:   %s",
+		op->cmd.nbytes, op->cmd.opcode,
+		op->addr.nbytes, op->addr.val,
+		op->dummy.nbytes,
+		op->data.dir == SPI_MEM_NO_DATA ? "INVALID" :
+		(op->data.dir == SPI_MEM_DATA_IN ? "IN" : "OUT"));
+	dump_stack();
 
 	offset = 0;
 	while (offset < len) {
@@ -218,12 +289,37 @@ static ssize_t sg2044_spifmc_write(struct sg2044_spifmc *spifmc,
 	int i, offset;
 	int ret;
 	u32 reg;
+	static int count;
+	count++;
+
+	pr_info("[SG2042] spifmc WRITE begin");
+	pr_info("op->cmd.nbytes:   %08hhd op->cmd.opcode: %08hx"
+		"op->addr.nbytes:  %08hhd op->addr.val:   %08llx"
+		"op->dummy.nbytes: %08hhd op->data.dir:   %s",
+		op->cmd.nbytes, op->cmd.opcode,
+		op->addr.nbytes, op->addr.val,
+		op->dummy.nbytes,
+		op->data.dir == SPI_MEM_NO_DATA ? "INVALID" :
+		(op->data.dir == SPI_MEM_DATA_IN ? "IN" : "OUT"));
+	dump_stack();
 
 	reg = sg2044_spifmc_init_reg(spifmc);
 	reg |= (op->addr.nbytes + op->dummy.nbytes) << SPIFMC_TRAN_CSR_ADDR_BYTES_SHIFT;
 	reg |= SPIFMC_TRAN_CSR_FIFO_TRG_LVL_8_BYTE;
 	reg |= SPIFMC_TRAN_CSR_WITH_CMD;
 	reg |= SPIFMC_TRAN_CSR_TRAN_MODE_TX;
+
+	pr_info("\n0. [SG2042] WRITE origin_csr \n"
+		"ctrl:      %08x, ce_ctrl:  %08x\n"
+		"dly_ctrl:  %08x, dmmr:     %08x\n"
+		"tran_csr:  %08x, tran_num: %08x\n"
+		"fifo_port: %08x, fifo_pt:  %08x\n"
+		"int_sys:   %08x, int_en:   %08x\n"
+		, readw(spifmc->io_base + SOPHGO_SPI_CTRL) , readw(spifmc->io_base + SOPHGO_SPI_CE_CTRL)
+		, readw(spifmc->io_base + SOPHGO_SPI_DLY_CTRL) , readw(spifmc->io_base + SOPHGO_SPI_DMMR)
+		, readw(spifmc->io_base + SOPHGO_SPI_TRAN_CSR) , readw(spifmc->io_base + SOPHGO_SPI_TRAN_NUM)
+		, 0xffffffff /* Should not read */ , readw(spifmc->io_base + SOPHGO_SPI_FIFO_PT)
+		, readw(spifmc->io_base + SOPHGO_SPI_INT_STS) , readw(spifmc->io_base + SOPHGO_SPI_INT_EN));
 
 	writel(0, spifmc->io_base + SPIFMC_FIFO_PT);
 	writeb(op->cmd.opcode, spifmc->io_base + SPIFMC_FIFO_PORT);
@@ -237,11 +333,37 @@ static ssize_t sg2044_spifmc_write(struct sg2044_spifmc *spifmc,
 	writel(0, spifmc->io_base + SPIFMC_INT_STS);
 	writel(op->data.nbytes, spifmc->io_base + SPIFMC_TRAN_NUM);
 	reg |= SPIFMC_TRAN_CSR_GO_BUSY;
+
 	writel(reg, spifmc->io_base + SPIFMC_TRAN_CSR);
 
+	pr_info("1. [SG2042] WRITE masked_csr \n"
+		"ctrl:      %08x, ce_ctrl:  %08x\n"
+		"dly_ctrl:  %08x, dmmr:     %08x\n"
+		"tran_csr:  %08x, tran_num: %08x\n"
+		"fifo_port: %08x, fifo_pt:  %08x\n"
+		"int_sys:   %08x, int_en:   %08x\n"
+		, readw(spifmc->io_base + SOPHGO_SPI_CTRL) , readw(spifmc->io_base + SOPHGO_SPI_CE_CTRL)
+		, readw(spifmc->io_base + SOPHGO_SPI_DLY_CTRL) , readw(spifmc->io_base + SOPHGO_SPI_DMMR)
+		, readw(spifmc->io_base + SOPHGO_SPI_TRAN_CSR) , readw(spifmc->io_base + SOPHGO_SPI_TRAN_NUM)
+		, 0xffffffff /* Should not read */ , readw(spifmc->io_base + SOPHGO_SPI_FIFO_PT)
+		, readw(spifmc->io_base + SOPHGO_SPI_INT_STS) , readw(spifmc->io_base + SOPHGO_SPI_INT_EN));
+
 	ret = sg2044_spifmc_wait_xfer_size(spifmc, 0);
-	if (ret < 0)
+	if (ret < 0) {
+		dev_warn(spifmc->dev, " %s spifmc_wait_xfer_size timed out.", __func__);
+		pr_info("2. [SG2042] XFER_SIZE timed out csr \n"
+			"ctrl:      %08x, ce_ctrl:  %08x\n"
+			"dly_ctrl:  %08x, dmmr:     %08x\n"
+			"tran_csr:  %08x, tran_num: %08x\n"
+			"fifo_port: %08x, fifo_pt:  %08x\n"
+			"int_sys:   %08x, int_en:   %08x\n"
+			, readw(spifmc->io_base + SOPHGO_SPI_CTRL) , readw(spifmc->io_base + SOPHGO_SPI_CE_CTRL)
+			, readw(spifmc->io_base + SOPHGO_SPI_DLY_CTRL) , readw(spifmc->io_base + SOPHGO_SPI_DMMR)
+			, readw(spifmc->io_base + SOPHGO_SPI_TRAN_CSR) , readw(spifmc->io_base + SOPHGO_SPI_TRAN_NUM)
+			, 0xffffffff /* Should not read */ , readw(spifmc->io_base + SOPHGO_SPI_FIFO_PT)
+			, readw(spifmc->io_base + SOPHGO_SPI_INT_STS) , readw(spifmc->io_base + SOPHGO_SPI_INT_EN));
 		return ret;
+	}
 
 	writel(0, spifmc->io_base + SPIFMC_FIFO_PT);
 
@@ -250,9 +372,12 @@ static ssize_t sg2044_spifmc_write(struct sg2044_spifmc *spifmc,
 		xfer_size = min_t(size_t, SPIFMC_MAX_FIFO_DEPTH, op->data.nbytes - offset);
 
 		ret = sg2044_spifmc_wait_xfer_size(spifmc, 0);
-		if (ret < 0)
+		if (ret < 0) {
+			dev_warn(spifmc->dev, " %s spifmc_wait_xfer_size timed out.", __func__);
 			return ret;
+		}
 
+		pr_info("3. [SG2042] WRITE called %d offset :%d len :%u xfer_size :%lu", count, offset, op->data.nbytes, xfer_size);
 		for (i = 0; i < xfer_size; i++)
 			writeb(dout[i + offset], spifmc->io_base + SPIFMC_FIFO_PORT);
 
@@ -260,8 +385,10 @@ static ssize_t sg2044_spifmc_write(struct sg2044_spifmc *spifmc,
 	}
 
 	ret = sg2044_spifmc_wait_int(spifmc, SPIFMC_INT_TRAN_DONE);
-	if (ret < 0)
+	if (ret < 0) {
+		dev_warn(spifmc->dev, " %s spifmc_wait_int TRAN_DONE timed out.", __func__);
 		return ret;
+	}
 
 	writel(0, spifmc->io_base + SPIFMC_FIFO_PT);
 
@@ -273,6 +400,17 @@ static ssize_t sg2044_spifmc_tran_cmd(struct sg2044_spifmc *spifmc,
 {
 	int i, ret;
 	u32 reg;
+
+	pr_info("[SG2042] spifmc TRANS CMD begin");
+	pr_info("op->cmd.nbytes:   %08hhd op->cmd.opcode: %08hx"
+		"op->addr.nbytes:  %08hhd op->addr.val:   %08llx"
+		"op->dummy.nbytes: %08hhd op->data.dir:   %s",
+		op->cmd.nbytes, op->cmd.opcode,
+		op->addr.nbytes, op->addr.val,
+		op->dummy.nbytes,
+		op->data.dir == SPI_MEM_NO_DATA ? "INVALID" :
+		(op->data.dir == SPI_MEM_DATA_IN ? "IN" : "OUT"));
+	dump_stack();
 
 	reg = sg2044_spifmc_init_reg(spifmc);
 	reg |= (op->addr.nbytes + op->dummy.nbytes) << SPIFMC_TRAN_CSR_ADDR_BYTES_SHIFT;
@@ -293,8 +431,10 @@ static ssize_t sg2044_spifmc_tran_cmd(struct sg2044_spifmc *spifmc,
 	writel(reg, spifmc->io_base + SPIFMC_TRAN_CSR);
 
 	ret = sg2044_spifmc_wait_int(spifmc, SPIFMC_INT_TRAN_DONE);
-	if (ret < 0)
+	if (ret < 0) {
+		dev_warn(spifmc->dev, " %s spifmc_wait_int TRAN_DONE timed out.", __func__);
 		return ret;
+	}
 
 	writel(0, spifmc->io_base + SPIFMC_FIFO_PT);
 
@@ -321,6 +461,18 @@ static ssize_t sg2044_spifmc_trans_reg(struct sg2044_spifmc *spifmc,
 	int ret, i;
 	u32 reg;
 
+	pr_info("[SG2042] No address, transmit register");
+	pr_info("[SG2042] spifmc TRANS REGISTER begin");
+	pr_info("op->cmd.nbytes:   %08hhd op->cmd.opcode: %08hx"
+		"op->addr.nbytes:  %08hhd op->addr.val:   %08llx"
+		"op->dummy.nbytes: %08hhd op->data.dir:   %s",
+		op->cmd.nbytes, op->cmd.opcode,
+		op->addr.nbytes, op->addr.val,
+		op->dummy.nbytes,
+		op->data.dir == SPI_MEM_NO_DATA ? "INVALID" :
+		(op->data.dir == SPI_MEM_DATA_IN ? "IN" : "OUT"));
+	dump_stack();
+
 	if (op->data.dir == SPI_MEM_DATA_IN)
 		din = op->data.buf.in;
 	else
@@ -335,7 +487,7 @@ static ssize_t sg2044_spifmc_trans_reg(struct sg2044_spifmc *spifmc,
 		reg |= SPIFMC_TRAN_CSR_TRAN_MODE_RX;
 		reg |= SPIFMC_TRAN_CSR_TRAN_MODE_TX;
 
-		writel(SPIFMC_OPT_DISABLE_FIFO_FLUSH, spifmc->io_base + SPIFMC_OPT);
+		//writel(SPIFMC_OPT_DISABLE_FIFO_FLUSH, spifmc->io_base + SPIFMC_OPT);
 	} else {
 		/*
 		 * If write values to the Status Register,
@@ -374,7 +526,6 @@ static ssize_t sg2044_spifmc_trans_reg(struct sg2044_spifmc *spifmc,
 	}
 
 	writel(0, spifmc->io_base + SPIFMC_FIFO_PT);
-
 	return 0;
 }
 
@@ -430,6 +581,7 @@ static int sg2044_spifmc_probe(struct platform_device *pdev)
 	struct sg2044_spifmc *spifmc;
 	int ret;
 
+	pr_info("[SG2042] spifmc probed");
 	ctrl = devm_spi_alloc_host(&pdev->dev, sizeof(*spifmc));
 	if (!ctrl)
 		return -ENOMEM;
