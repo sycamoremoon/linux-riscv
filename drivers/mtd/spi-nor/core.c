@@ -2001,7 +2001,7 @@ static const struct flash_info *spi_nor_detect(struct spi_nor *nor)
 
 	/* Fallback to a generic flash described only by its SFDP data. */
 	if (!info) {
-		pr_info("SPI_NOR: Fallback to a generic flash, Bad ID: %s", id);
+		pr_info("SPI_NOR: Fallback to a generic flash, Bad ID: %16llx", *(uint64_t *)id);
 		ret = spi_nor_check_sfdp_signature(nor);
 		if (!ret)
 			info = &spi_nor_generic_flash;

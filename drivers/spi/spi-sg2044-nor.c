@@ -199,7 +199,9 @@ static ssize_t sg2044_spifmc_read_64k(struct sg2044_spifmc *spifmc,
 		, readw(spifmc->io_base + SOPHGO_SPI_INT_STS) , readw(spifmc->io_base + SOPHGO_SPI_INT_EN));
 
 
-	ret = sg2044_spifmc_wait_int(spifmc, SPIFMC_INT_RD_FIFO);
+	if(len < 8) ret = sg2044_spifmc_wait_int(spifmc, SPIFMC_INT_RD_FIFO | SPIFMC_INT_RX_FRAME_EN);
+	else ret = sg2044_spifmc_wait_int(spifmc, SPIFMC_INT_RD_FIFO);
+
 	if (ret < 0) {
 		dev_warn(spifmc->dev, " %s spifmc_wait_int RD_FIFO timed out.", __func__);
 		pr_info("2. [SG2042] RD_FIFO timed out csr \n"
@@ -255,9 +257,9 @@ static ssize_t sg2044_spifmc_read(struct sg2044_spifmc *spifmc,
 	u8 *din = op->data.buf.in;
 
 	pr_info("[SG2042] spifmc READ begin");
-	pr_info("op->cmd.nbytes:   %08hhd op->cmd.opcode: %08hx"
-		"op->addr.nbytes:  %08hhd op->addr.val:   %08llx"
-		"op->dummy.nbytes: %08hhd op->data.dir:   %s",
+	pr_info("op->cmd.nbytes:   %08hhd op->cmd.opcode: %08hx\n"
+		"op->addr.nbytes:  %08hhd op->addr.val:   %08llx\n"
+		"op->dummy.nbytes: %08hhd op->data.dir:   %s\n",
 		op->cmd.nbytes, op->cmd.opcode,
 		op->addr.nbytes, op->addr.val,
 		op->dummy.nbytes,
@@ -293,9 +295,9 @@ static ssize_t sg2044_spifmc_write(struct sg2044_spifmc *spifmc,
 	count++;
 
 	pr_info("[SG2042] spifmc WRITE begin");
-	pr_info("op->cmd.nbytes:   %08hhd op->cmd.opcode: %08hx"
-		"op->addr.nbytes:  %08hhd op->addr.val:   %08llx"
-		"op->dummy.nbytes: %08hhd op->data.dir:   %s",
+	pr_info("op->cmd.nbytes:   %08hhd op->cmd.opcode: %08hx\n"
+		"op->addr.nbytes:  %08hhd op->addr.val:   %08llx\n"
+		"op->dummy.nbytes: %08hhd op->data.dir:   %s\n",
 		op->cmd.nbytes, op->cmd.opcode,
 		op->addr.nbytes, op->addr.val,
 		op->dummy.nbytes,
@@ -402,9 +404,9 @@ static ssize_t sg2044_spifmc_tran_cmd(struct sg2044_spifmc *spifmc,
 	u32 reg;
 
 	pr_info("[SG2042] spifmc TRANS CMD begin");
-	pr_info("op->cmd.nbytes:   %08hhd op->cmd.opcode: %08hx"
-		"op->addr.nbytes:  %08hhd op->addr.val:   %08llx"
-		"op->dummy.nbytes: %08hhd op->data.dir:   %s",
+	pr_info("op->cmd.nbytes:   %08hhd op->cmd.opcode: %08hx\n"
+		"op->addr.nbytes:  %08hhd op->addr.val:   %08llx\n"
+		"op->dummy.nbytes: %08hhd op->data.dir:   %s\n",
 		op->cmd.nbytes, op->cmd.opcode,
 		op->addr.nbytes, op->addr.val,
 		op->dummy.nbytes,
@@ -463,9 +465,9 @@ static ssize_t sg2044_spifmc_trans_reg(struct sg2044_spifmc *spifmc,
 
 	pr_info("[SG2042] No address, transmit register");
 	pr_info("[SG2042] spifmc TRANS REGISTER begin");
-	pr_info("op->cmd.nbytes:   %08hhd op->cmd.opcode: %08hx"
-		"op->addr.nbytes:  %08hhd op->addr.val:   %08llx"
-		"op->dummy.nbytes: %08hhd op->data.dir:   %s",
+	pr_info("op->cmd.nbytes:   %08hhd op->cmd.opcode: %08hx\n"
+		"op->addr.nbytes:  %08hhd op->addr.val:   %08llx\n"
+		"op->dummy.nbytes: %08hhd op->data.dir:   %s\n",
 		op->cmd.nbytes, op->cmd.opcode,
 		op->addr.nbytes, op->addr.val,
 		op->dummy.nbytes,
