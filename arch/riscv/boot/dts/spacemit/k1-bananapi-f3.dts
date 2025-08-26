@@ -30,6 +30,21 @@
 	};
 };
 
+&sdcard {
+	pinctrl-names = "default";
+	pinctrl-0 = <&sdcard_cfg>;
+	bus-width = <4>;
+	no-mmc;
+	no-sdio;
+	clock-frequency = <204800000>;
+	//cd-gpio = <&gpio K1_GPIO(80) GPIO_ACTIVE_HIGH>;
+	spacemit,tx_delaycode = <0x5f>;
+	//cd-inverted;
+	broken-cd;
+	wp-inverted;
+	status = "okay";
+};
+
 &emmc {
 	bus-width = <8>;
 	mmc-hs400-1_8v;
