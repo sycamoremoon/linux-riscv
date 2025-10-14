@@ -751,7 +751,6 @@ static int spacemit_sdhci_probe(struct platform_device *pdev)
 	return 0;
 
 err_pltfm:
-	sdhci_pltfm_free(pdev);
 	return ret;
 }
 
@@ -768,8 +767,6 @@ static void spacemit_sdhci_remove(struct platform_device *pdev)
 		for (i = 0; i < ARRAY_SIZE(spacemit_sysfs_files); i++)
 			device_remove_file(&pdev->dev, &spacemit_sysfs_files[i]);
 	}
-
-	sdhci_pltfm_free(pdev);
 }
 
 static struct platform_driver spacemit_sdhci_driver = {
@@ -778,7 +775,7 @@ static struct platform_driver spacemit_sdhci_driver = {
 		.of_match_table = spacemit_sdhci_of_match,
 	},
 	.probe		= spacemit_sdhci_probe,
-	.remove_new	= spacemit_sdhci_remove,
+	.remove		= spacemit_sdhci_remove,
 };
 module_platform_driver(spacemit_sdhci_driver);
 
